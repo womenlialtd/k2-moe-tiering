@@ -98,7 +98,7 @@
 ### 只能在 1660 上做（H 系列）
 | 项 | 内容 | 备注 |
 |---|---|---|
-| H1 | **专家激活直方图**（~50 prompt × 4096 token，每层×每专家命中次数）→ `expert_hits.json` | **全课题瓶颈**，没它 A/B 路线只能猜 |
+| H1 | **专家激活直方图**（~50 prompt × 4096 token，每层×每专家命中次数）→ `expert_hits.json` | **全课题瓶颈**，没它 P1/P2 与 R-A 参数只能猜 |
 | H2 | `-ncmoe` 不同 N 的显存/内存/tok/s 基线 | 需 CUDA |
 | H3 | 实测 DDR4/PCIe 带宽（stream / nvbandwidth） | 替换 md §2 估算值 |
 | H4 | 验证 attn_v_exps 未覆盖时是否 OOM | 需真加载 |
@@ -147,4 +147,4 @@
 | H4 | 验证 attn_v_exps 未被 `-ncmoe` 覆盖时是否 OOM | 需真加载 |
 | H5 | 21 层 Q6_K down 统一为 Q4_K，实测省 1.064 GB / 每 token −5.5% | 收益已下调，低优先级 |
 
-拿到 H1 后回填两处：`model/` 的假设偏度 s → 实测值；`design/` 路线 A 的热集划分 → 实测排序。
+拿到 H1 后回填两处：`model/` 的假设偏度 s → 实测值；`design/` R-A 的热集划分 → 实测排序。
