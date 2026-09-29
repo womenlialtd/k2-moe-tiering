@@ -170,9 +170,9 @@ A 和 B 可以叠加：先用 A 的热集划分缩小缺页集合，再用 B 的
 | S2 | 源码核对卸载正则与粒度限制（`common/common.h`、`models/k2-horizon.cpp`） | ✅ 已完成 |
 | S3 | 核对 Strata 的架构门槛与几何锁定（README/CMake/头文件/文档/安装包） | ✅ 已完成 |
 | S4 | 导出机器可读的张量清单 CSV，作为后续设计的固定输入 | ✅ 已完成（`data/k2-mova-36b-tensors.csv`，798 行，守恒差 720 B） |
-| S5 | 编写"专家激活直方图"统计补丁（`build_moe_ffn` router 输出处插桩） | ⬜ 待做 |
-| S6 | 纯算术建模：给定命中率/偏度假设，算 staging 池大小、预取深度、预期 tok/s | ⬜ 待做 |
-| S7 | 设计 `mmid.cu` / 专家 buffer 管理的最小改造方案（文档级，不在沙箱编译 CUDA） | ⬜ 待做 |
+| S5 | 专家激活直方图插桩补丁 | ✅ 已完成（`patches/expert-histogram/`，commit 55aa1ed）。**比原计划更好：零侵入** —— 只做独立 example 挂公开 API `cb_eval`，不改 `llama-graph.cpp`/`common/` 一行。锚点 `ffn_moe_argsort-<il>` / `v_moe_argsort-<il>`（这两处 `cb()` 的是完整 argsort，contiguous I32，无 topk view 的步长坑）。已过 `g++ -Wall -Wextra -fsyntax-only` 零警告 + 列主序解码逻辑独立单测 |
+| S6 | 纯算术建模（三级 VRAM/RAM/SSD） | ✅ 已完成（`model/tier_model.py`）。修了两版口径 bug：① 容量要按**全局专家池**算（FFN 4500 / value 2880），不是每层 100；② VRAM 预算不能重复分配给 value。**关键结论**：钉热集远胜纯流式 —— s=1.0 时 12.27 vs 5.74 tok/s，因为约 80% 命中走 VRAM、根本不占 PCIe。HKN=1 已由元数据（无 hkn 键）+ router 形状 `[64,n_tokens]` 确认为常量 |
+| S7 | 专家分层最小改造方案 | ✅ 已完成（`design/S7-mmid-tiering-plan.md`，90 行/6 章，引用行号已逐条抽查复核）。**修正先前的悲观判断**：真正的专家寻址点只有 **9 行**（mmq.cuh 3、mmvq.cu 2、mmf.cuh 2、mmvf.cu 2），不是 grep 到的 123 处（其余全是签名传参）；且 `stride_channel_x` 由 host 传入、kernel 不假设张量紧凑布局 ⇒ kernel 改动只是"乘法改查表"，工作量集中在 **buffer 分配层的专家切片管理 + 缺页预取调度**，不在算力/kernel |
 | S8 | 核验四类专家张量的真实量化类型：**不读枚举名**，用 `n_bytes×8÷元素数` 反推 bits/元素匹配官方块定义。结果 gate/up/attn_v = **Q4_K**(4.5)、down = **混合 Q4_K/Q6_K**，798 张量 0 未知 | ✅ 已完成 |
 | S9 | 可复现工具 `tools/dump_tensors.py`（63 行，含 `-ncmoe` 命中判定，已验证能重建 CSV） | ✅ 已完成 |
 
@@ -209,5 +209,13 @@ H1 是整个课题的瓶颈项：**没有它，A/B 的参数都只能猜**。
 - 7B（`num_experts=0`，纯 dense）**不是本课题对象**——没有专家可分层。
 - 36B-A4B 是真 MoE 且专家占 90.5%，是合适的研究对象；但它在 1660+16GB 上**不是"能不能装下"的问题，而是 1.545 GB/token 的搬运问题**。
 - 显存不是瓶颈（放完非专家还剩 ~3.2 GB），**内存容量和 SSD 缺页才是**。
-- llama.cpp 现有卸载机制粒度太粗（整层/整张量），任何有意义的层内热冷分层都必须改 `mmid.cu`。工作量集中在这里，也正是 Strata 论文的核心贡献所在。
-- 下一步最高价值的动作：写 H1 的插桩补丁，拿到真实激活直方图。
+- llama.cpp 现有卸载机制粒度太粗（整层/整张量），做不到单张 3D 张量内只卸部分专家 ⇒ 层内热冷分层**必须自己实现**（S7 方案，`design/S7-mmid-tiering-plan.md`）。
+  ⚠️ 但改造量比先前预估**小得多**（先前说"工作量集中在改 `mmid.cu`"是悲观且不准确的说法）：
+  专家寻址的真改动点只有 **9 行**（把 `channel_x*stride_channel_x` 改成查 `expert_off[]` 表），
+  因为 `stride_channel_x` 本来就是 host 传入、kernel 不假设张量紧凑布局。
+  **工作量实际集中在 buffer 分配层的专家切片管理 + 缺页预取调度，不在算力/kernel。**
+  另一条零 kernel 改动路线（CUDA VMM 重映射，ggml-cuda 已在用）因 granularity ~2 MB
+  大于单专家 blob（1.1/1.47/1.61 MB）而无法做到单专家粒度，只能做分组——故列为退路而非主线。
+- 沙箱侧 S1–S9 已全部完成。**下一步最高价值动作在 1660 那台机器**：用 `patches/expert-histogram/`
+  跑出 H1 真实激活直方图 → 把 S6 模型里的假设偏度 s 换成实测值、把 S7 路线 A 的热集划分定下来。
+  这是当前唯一还依赖真机、无法在沙箱替代的关键输入。

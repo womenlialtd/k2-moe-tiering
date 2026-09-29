@@ -123,9 +123,28 @@
 9. `file_edit`/`file_write` 回显的字节数口径不可信，怀疑截断时用 `wc -l -c` + `tail` + `grep -c '^#'` 三件套核验
 
 ## 7. 下一步（严格按序）
-1. 补完 `tools/dump_tensors.py`（分段 heredoc，定义 `QNAME` 收尾 `main()`），跑出 CSV 与正则命中表
-2. 执行 S8：用 `GGML_QUANT_SIZES` 算术钉死 code 12/14 的量化类型，消除 `PENDING_VERIFY`
-3. 写 md 的 S5 插桩补丁内容，落到仓库 `patches/`
-4. S6 算术吞吐模型、S7 `mmid.cu` 改造方案
-5. `git add + commit`（首次提交）
-6. 做完的事写回 md 状态表 + 存本地记忆
+## 沙箱侧已全部完成（S1–S9）✅
+
+1. ✅ `tools/dump_tensors.py`（63 行，含 `-ncmoe` 命中判定，实测可复现 CSV）
+2. ✅ S8 量化钉死：**不读枚举名**，用 `n_bytes×8÷元素数` 反推 bits/元素匹配官方块定义
+   - gate/up/attn_v_exps = **Q4_K**(4.5 bit)；ffn_down_exps = **混合** 24 层 Q4_K + 21 层 Q6_K
+   - 798 张量 0 未知；`PENDING_VERIFY` 已清零；H5 收益下调为 −6.7%/−5.5%（非 13%）
+3. ✅ S5 插桩补丁 `patches/expert-histogram/`（**零侵入**，只挂公开 API `cb_eval` + `t->name`；
+   已过 `g++ -Wall -Wextra -fsyntax-only` 零警告 + 列主序解码逻辑独立单测）
+4. ✅ S6 `model/tier_model.py`（三级模型；修了两处口径 bug：全局专家池、VRAM 预算不重复分配）
+   ✅ S7 `design/S7-mmid-tiering-plan.md`（真寻址点只有 **9 行**，非先前说的 123；
+   工作量在 buffer 分配层，不在 kernel。零改 kernel 的 VMM 路线因 granularity 2MB > 单专家 blob 而列为退路）
+5. ✅ git commit：c552b86(S4/S8/S9) → 55aa1ed(S5) → 本次(S6/S7/README)
+6. ✅ 状态写回 md + 存记忆
+
+## 剩余工作（全部需 1660 真机，沙箱不可替代）
+
+| # | 任务 | 为什么沙箱做不了 |
+|---|---|---|
+| H1 | 用 `patches/expert-histogram/` 跑真实激活直方图 → `expert_hits.json` | 需 CUDA 推理。**全课题瓶颈** |
+| H2 | `-ncmoe` 不同 N 的显存/内存/tok/s 基线 | 需 CUDA |
+| H3 | 实测 DDR4/PCIe/NVMe 带宽 → 替换 `model/tier_model.py` 里 BW_* | 需本机硬件 |
+| H4 | 验证 attn_v_exps 未被 `-ncmoe` 覆盖时是否 OOM | 需真加载 |
+| H5 | 21 层 Q6_K down 统一为 Q4_K，实测省 1.064 GB / 每 token −5.5% | 收益已下调，低优先级 |
+
+拿到 H1 后回填两处：`model/` 的假设偏度 s → 实测值；`design/` 路线 A 的热集划分 → 实测排序。
