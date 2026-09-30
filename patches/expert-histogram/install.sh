@@ -12,4 +12,4 @@ grep -qF "expert-histogram" "$F" || \
   sed -i "s#\(add_subdirectory(eval-callback)\)#\1\n$LINE#" "$F"
 echo "已注册。构建："
 echo "  cmake -B build -DLLAMA_CUBLAS=ON -DLLAMA_BUILD_EXAMPLES=ON"
-echo "  cmake --build build --config Release -t $TARGET 2>/dev/null || cmake --build build --config Release"
+echo "  cmake --build build --config Release -t llama-expert-histogram"

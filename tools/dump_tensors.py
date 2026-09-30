@@ -3,12 +3,16 @@
 方法：量化类型不读枚举名（多套编号空间易错），改用 实测 n_bytes*8/元素数
       匹配 ggml 官方块 bits/元素。依赖 pip install gguf。
 用法：python3 tools/dump_tensors.py [gguf路径]  (输出 data/k2-mova-36b-tensors.csv)
+      也可用环境变量 K2_GGUF 指定；两者都缺省时按下方 DEFAULTS 顺序探测。
 """
 import csv, os, re, sys
 from collections import defaultdict
 from gguf import GGUFReader
 
-DEFAULT = "/var/minis/mounts/1minis/K2-Horizon-MoVA-36B-A4B-Q4_K_M.gguf"
+# 候选路径：K2_GGUF 环境变量优先，其次常见放置位置。找不到会明确报错，不猜。
+DEFAULTS = [os.environ.get("K2_GGUF", ""),
+            "K2-Horizon-MoVA-36B-A4B-Q4_K_M.gguf",
+            "../K2-Horizon-MoVA-36B-A4B-Q4_K_M.gguf"]
 # (bits/元素, 名称) 来自 ggml-common.h：QK_K=256, 每块字节/256
 THEO = [(4.5,'Q4_K'),(5.5,'Q5_K'),(6.5625,'Q6_K'),(8.0,'Q8_0'),(16.0,'F16/BF16'),
         (32.0,'F32'),(2.625,'Q2_K'),(3.4375,'Q3_K'),(4.25,'IQ4_XS'),(5.25,'IQ3'),
@@ -22,7 +26,9 @@ def quant_of(bpp):
     return f"UNKNOWN({bpp:.4f})"
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT
+    path = next((p for p in ([sys.argv[1]] if len(sys.argv) > 1 else []) + DEFAULTS if p and os.path.exists(p)), "")
+    if not path:
+        sys.exit("找不到 GGUF：把路径作为参数传入，或设 K2_GGUF 环境变量。候选： %s" % DEFAULTS[1:])
     fs = os.path.getsize(path)
     r = GGUFReader(path)
     rows, agg = [], defaultdict(lambda: [0, 0, set()])
